@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Socket Zoom By Harsha</title>
+<style>
+  /* Inline CSS styles */
+  body {
+    margin: 0; padding: 1rem;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #121212;
+    color: #eee;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+  }
+  h1 {
+    margin-bottom: 1rem;
+    color: #44c767;
+  }
+  #msgForm {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  video {
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+    background: #222;
+    box-shadow: 0 0 10px #44c767aa;
+  }
+  #localVideo {
+    filter: brightness(0.9);
+  }
+  #remoteVideo {
+    min-height: 180px;
+    background: #111;
+    position: relative;
+  }
+  #loadingIndicator {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #44c767;
+    font-weight: 700;
+    font-size: 1.2rem;
+    user-select: none;
+  }
+  input[type=text] {
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    border: none;
+    font-size: 1rem;
+    outline: none;
+  }
+  button {
+    cursor: pointer;
+    border: none;
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 1rem;
+    color: white;
+    background-color: #44c767;
+    transition: background-color 0.3s ease;
+  }
+  button:hover {
+    background-color: #3da456;
+  }
+  #controls {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  ul#ulMsgs {
+    max-height: 150px;
+    overflow-y: auto;
+    padding-left: 1rem;
+    border-radius: 8px;
+    background: #222;
+  }
+  ul#ulMsgs li {
+    margin-bottom: 0.4rem;
+    font-size: 0.9rem;
+  }
+
+  /* Responsive */
+  @media (max-width: 480px) {
+    #msgForm {
+      max-width: 100%;
+    }
+    video {
+      min-height: 150px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<form id="msgForm">
+  <h1>Sockets Zoom By Harsha</h1>
+
+  <video id="localVideo" autoplay muted playsinline></video>
+  <div style="position:relative;">
+    <video id="remoteVideo" autoplay playsinline></video>
+    <div id="loadingIndicator">Waiting for peer...</div>
+  </div>
+
+  <div id="controls">
+    <button type="button" id="toggleCamBtn">Turn Camera Off</button>
+    <button type="button" id="toggleMicBtn">Mute Mic</button>
+    <button type="button" id="shareScreenBtn">Share Screen</button>
+  </div>
+
+  <input type="text" placeholder="Type a Message..." id="inputMsg" />
+  <button type="submit">Send</button>
+
+  <ul id="ulMsgs"></ul>
+</form>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+
+  const inputMsg = document.getElementById('inputMsg');
+  const messagesList = document.getElementById('ulMsgs');
+  const form = document.getElementById('msgForm');
+
+  const localVideo = document.getElementById('localVideo');
+  const remoteVideo = document.getElementById('remoteVideo');
+  const loadingIndicator = document.getElementById('loadingIndicator');
+
+  const toggleCamBtn = document.getElementById('toggleCamBtn');
+  const toggleMicBtn = document.getElementById('toggleMicBtn');
+  const shareScreenBtn = document.getElementById('shareScreenBtn');
+
+  let localStream;
+  let peerConnection;
+  const config = {
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  };
+
+  let camEnabled = true;
+  let micEnabled = true;
+
+  // Message send
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    sendMessage();
+  });
+
+  const sendMessage = () => {
+    const data = inputMsg.value.trim();
+    if (!data) return;
+    socket.emit('message', data);
+    inputMsg.value = '';
+    addMessage('You: ' + data);
+  };
+
+  socket.on('message', (data) => {
+    addMessage('Friend: ' + data.msg);
+  });
+
+  const addMessage = (msg) => {
+    const li = document.createElement('li');
+    li.innerText = msg;
+    messagesList.appendChild(li);
+    messagesList.scrollTop = messagesList.scrollHeight;
+  };
+
+  // Start local video and create PeerConnection
+  async function startVideo() {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      });
+      localVideo.srcObject = localStream;
+
+      peerConnection = new RTCPeerConnection(config);
+
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+      });
+
+      peerConnection.onicecandidate = ({ candidate }) => {
+        if (candidate) {
+          socket.emit('ice-candidate', candidate);
+        }
+      };
+
+      peerConnection.ontrack = (event) => {
+        if(event.streams && event.streams[0]){
+          remoteVideo.srcObject = event.streams[0];
+          loadingIndicator.style.display = 'none';
+        }
+      };
+
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      socket.emit('offer', offer);
+
+    } catch (err) {
+      console.error('Error accessing media devices.', err);
+      alert('Error accessing camera or mic. Please check permissions.');
+    }
+  }
+
+  socket.on('offer', async (offer) => {
+    if (!peerConnection) {
+      await startVideo();
+    }
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    socket.emit('answer', answer);
+  });
+
+  socket.on('answer', async (answer) => {
+    if(peerConnection){
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    }
+  });
+
+  let remoteDescriptionSet = false;
+  let candidateQueue = [];
+
+  socket.on('ice-candidate', async (candidate) => {
+    if (peerConnection && peerConnection.remoteDescription) {
+      try {
+        await peerConnection.addIceCandidate(candidate);
+        console.log("✅ ICE candidate added");
+      } catch (e) {
+        console.error("❌ Error adding ICE candidate", e);
+      }
+    } else {
+      console.log("🕓 Queuing ICE candidate...");
+      candidateQueue.push(candidate);
+    }
+  });
+
+  // Handle queued ICE candidates once remote description is set
+  async function processCandidateQueue() {
+    for (const candidate of candidateQueue) {
+      try {
+        await peerConnection.addIceCandidate(candidate);
+        console.log("✅ Queued ICE candidate added");
+      } catch (e) {
+        console.error("❌ Error adding queued ICE candidate", e);
+      }
+    }
+    candidateQueue = [];
+  }
+
+  // Toggle camera on/off
+  toggleCamBtn.onclick = () => {
+    if (!localStream) return;
+    camEnabled = !camEnabled;
+    localStream.getVideoTracks().forEach(track => track.enabled = camEnabled);
+    toggleCamBtn.textContent = camEnabled ? 'Turn Camera Off' : 'Turn Camera On';
+  };
+
+  // Toggle mic on/off
+  toggleMicBtn.onclick = () => {
+    if (!localStream) return;
+    micEnabled = !micEnabled;
+    localStream.getAudioTracks().forEach(track => track.enabled = micEnabled);
+    toggleMicBtn.textContent = micEnabled ? 'Mute Mic' : 'Unmute Mic';
+  };
+
+  // Screen sharing
+  shareScreenBtn.onclick = async () => {
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: true
+      });
+
+      const screenTrack = screenStream.getVideoTracks()[0];
+
+      const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
+      if (sender) {
+        sender.replaceTrack(screenTrack);
+      }
+
+      localVideo.srcObject = screenStream;
+
+      screenTrack.onended = () => {
+        if(localStream){
+          const cameraTrack = localStream.getVideoTracks()[0];
+          if(sender){
+            sender.replaceTrack(cameraTrack);
+          }
+          localVideo.srcObject = localStream;
+        }
+      };
+    } catch (err) {
+      console.error('Screen sharing error:', err);
+    }
+  };
+
+  // Handle peer disconnect event from server (you must emit 'peer-disconnect' when a user disconnects)
+  socket.on('peer-disconnect', () => {
+    alert('Your peer disconnected. The page will refresh.');
+    location.reload();
+  });
+
+  // Start video on load
+  startVideo();
+
+</script>
+</body>
+</html>
