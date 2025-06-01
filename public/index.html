@@ -1,608 +1,229 @@
-<!-- <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Socket Zoom By Harsha</title>
-<style>
-  /* Inline CSS styles */
-  body {
-    margin: 0; padding: 1rem;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: #121212;
-    color: #eee;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-height: 100vh;
-  }
-  h1 {
-    margin-bottom: 1rem;
-    color: #44c767;
-  }
-  #msgForm {
-    width: 100%;
-    max-width: 480px;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-  video {
-    width: 100%;
-    height: auto;
-    border-radius: 12px;
-    background: #222;
-    box-shadow: 0 0 10px #44c767aa;
-  }
-  #localVideo {
-    filter: brightness(0.9);
-  }
-  #remoteVideo {
-    min-height: 180px;
-    background: #111;
-    position: relative;
-  }
-  #loadingIndicator {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    color: #44c767;
-    font-weight: 700;
-    font-size: 1.2rem;
-    user-select: none;
-  }
-  input[type=text] {
-    padding: 0.75rem 1rem;
-    border-radius: 12px;
-    border: none;
-    font-size: 1rem;
-    outline: none;
-  }
-  button {
-    cursor: pointer;
-    border: none;
-    padding: 0.75rem 1rem;
-    border-radius: 12px;
-    font-weight: 600;
-    font-size: 1rem;
-    color: white;
-    background-color: #44c767;
-    transition: background-color 0.3s ease;
-  }
-  button:hover {
-    background-color: #3da456;
-  }
-  #controls {
-    display: flex;
-    justify-content: center;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-  ul#ulMsgs {
-    max-height: 150px;
-    overflow-y: auto;
-    padding-left: 1rem;
-    border-radius: 8px;
-    background: #222;
-  }
-  ul#ulMsgs li {
-    margin-bottom: 0.4rem;
-    font-size: 0.9rem;
-  }
-
-  /* Responsive */
-  @media (max-width: 480px) {
-    #msgForm {
-      max-width: 100%;
-    }
-    video {
-      min-height: 150px;
-    }
-  }
-</style>
-</head>
-<body>
-
-<form id="msgForm">
-  <h1>Sockets Zoom By Harsha</h1>
-
-  <video id="localVideo" autoplay muted playsinline></video>
-  <div style="position:relative;">
-    <video id="remoteVideo" autoplay playsinline></video>
-    <div id="loadingIndicator">Waiting for peer...</div>
-  </div>
-
-  <div id="controls">
-    <button type="button" id="toggleCamBtn">Turn Camera Off</button>
-    <button type="button" id="toggleMicBtn">Mute Mic</button>
-    <button type="button" id="shareScreenBtn">Share Screen</button>
-  </div>
-
-  <input type="text" placeholder="Type a Message..." id="inputMsg" />
-  <button type="submit">Send</button>
-
-  <ul id="ulMsgs"></ul>
-</form>
-
-<script src="/socket.io/socket.io.js"></script>
-<script>
-  const socket = io();
-
-  const inputMsg = document.getElementById('inputMsg');
-  const messagesList = document.getElementById('ulMsgs');
-  const form = document.getElementById('msgForm');
-
-  const localVideo = document.getElementById('localVideo');
-  const remoteVideo = document.getElementById('remoteVideo');
-  const loadingIndicator = document.getElementById('loadingIndicator');
-
-  const toggleCamBtn = document.getElementById('toggleCamBtn');
-  const toggleMicBtn = document.getElementById('toggleMicBtn');
-  const shareScreenBtn = document.getElementById('shareScreenBtn');
-
-  let localStream;
-  let peerConnection;
-  const config = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-  };
-
-  let camEnabled = true;
-  let micEnabled = true;
-
-  // Message send
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    sendMessage();
-  });
-
-  const sendMessage = () => {
-    const data = inputMsg.value.trim();
-    if (!data) return;
-    socket.emit('message', data);
-    inputMsg.value = '';
-    addMessage('You: ' + data);
-  };
-
-  socket.on('message', (data) => {
-    addMessage('Friend: ' + data.msg);
-  });
-
-  const addMessage = (msg) => {
-    const li = document.createElement('li');
-    li.innerText = msg;
-    messagesList.appendChild(li);
-    messagesList.scrollTop = messagesList.scrollHeight;
-  };
-
-  // Start local video and create PeerConnection
-  async function startVideo() {
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
-      localVideo.srcObject = localStream;
-
-      peerConnection = new RTCPeerConnection(config);
-
-      localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
-      });
-
-      peerConnection.onicecandidate = ({ candidate }) => {
-        if (candidate) {
-          socket.emit('ice-candidate', candidate);
-        }
-      };
-
-      peerConnection.ontrack = (event) => {
-        if(event.streams && event.streams[0]){
-          remoteVideo.srcObject = event.streams[0];
-          loadingIndicator.style.display = 'none';
-        }
-      };
-
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      socket.emit('offer', offer);
-
-    } catch (err) {
-      console.error('Error accessing media devices.', err);
-      alert('Error accessing camera or mic. Please check permissions.');
-    }
-  }
-
-  socket.on('offer', async (offer) => {
-    if (!peerConnection) {
-      await startVideo();
-    }
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    socket.emit('answer', answer);
-  });
-
-  socket.on('answer', async (answer) => {
-    if(peerConnection){
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-    }
-  });
-
-  let remoteDescriptionSet = false;
-  let candidateQueue = [];
-
-  socket.on('ice-candidate', async (candidate) => {
-    if (peerConnection && peerConnection.remoteDescription) {
-      try {
-        await peerConnection.addIceCandidate(candidate);
-        console.log("✅ ICE candidate added");
-      } catch (e) {
-        console.error("❌ Error adding ICE candidate", e);
-      }
-    } else {
-      console.log("🕓 Queuing ICE candidate...");
-      candidateQueue.push(candidate);
-    }
-  });
-
-  // Handle queued ICE candidates once remote description is set
-  async function processCandidateQueue() {
-    for (const candidate of candidateQueue) {
-      try {
-        await peerConnection.addIceCandidate(candidate);
-        console.log("✅ Queued ICE candidate added");
-      } catch (e) {
-        console.error("❌ Error adding queued ICE candidate", e);
-      }
-    }
-    candidateQueue = [];
-  }
-
-  // Toggle camera on/off
-  toggleCamBtn.onclick = () => {
-    if (!localStream) return;
-    camEnabled = !camEnabled;
-    localStream.getVideoTracks().forEach(track => track.enabled = camEnabled);
-    toggleCamBtn.textContent = camEnabled ? 'Turn Camera Off' : 'Turn Camera On';
-  };
-
-  // Toggle mic on/off
-  toggleMicBtn.onclick = () => {
-    if (!localStream) return;
-    micEnabled = !micEnabled;
-    localStream.getAudioTracks().forEach(track => track.enabled = micEnabled);
-    toggleMicBtn.textContent = micEnabled ? 'Mute Mic' : 'Unmute Mic';
-  };
-
-  // Screen sharing
-  shareScreenBtn.onclick = async () => {
-    try {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true
-      });
-
-      const screenTrack = screenStream.getVideoTracks()[0];
-
-      const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
-      if (sender) {
-        sender.replaceTrack(screenTrack);
-      }
-
-      localVideo.srcObject = screenStream;
-
-      screenTrack.onended = () => {
-        if(localStream){
-          const cameraTrack = localStream.getVideoTracks()[0];
-          if(sender){
-            sender.replaceTrack(cameraTrack);
-          }
-          localVideo.srcObject = localStream;
-        }
-      };
-    } catch (err) {
-      console.error('Screen sharing error:', err);
-    }
-  };
-
-  // Handle peer disconnect event from server (you must emit 'peer-disconnect' when a user disconnects)
-  socket.on('peer-disconnect', () => {
-    alert('Your peer disconnected. The page will refresh.');
-    location.reload();
-  });
-
-  // Start video on load
-  startVideo();
-
-</script>
-</body>
-</html> -->
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Sockets Zoom By Harsha</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0; padding: 0;
-      background: #1e1e2f;
-      color: #fff;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 20px;
-    }
-
-    h1 { color: #00ffc6; margin-bottom: 10px; }
-    video {
-      width: 100%;
-      max-width: 400px;
-      border: 3px solid #00ffc6;
-      border-radius: 16px;
-      margin: 10px;
-    }
-
-    #controls {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 10px;
-    }
-
-    button {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 12px;
-      background-color: #00ffc6;
-      color: #000;
-      font-weight: bold;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background-color: #00e0b8;
-    }
-
-    #inputMsg {
-      padding: 10px;
-      border-radius: 8px;
-      border: none;
-      width: 200px;
-    }
-
-    #ulMsgs {
-      list-style: none;
-      padding: 0;
-      width: 100%;
-      max-width: 400px;
-    }
-
-    li { margin: 4px 0; }
-
-    .loading {
-      color: #ccc;
-      font-style: italic;
-      margin-top: 10px;
-    }
-
-    .hidden { display: none; }
-
-    @media screen and (max-width: 600px) {
-      video {
-        width: 90%;
-      }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Socket Meet</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e2f;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px;
+        }
+        h1 {
+            color: #4abede;
+            margin-bottom: 10px;
+        }
+        video {
+            width: 100%;
+            max-width: 480px;
+            margin: 5px;
+            border-radius: 10px;
+            background: #000;
+        }
+        .controls, .chat {
+            margin: 10px 0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #3b82f6;
+            border: none;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #2563eb;
+        }
+        .chat {
+            flex-direction: column;
+            width: 100%;
+            max-width: 480px;
+        }
+        #ulMsgs {
+            list-style: none;
+            padding: 0;
+            max-height: 150px;
+            overflow-y: auto;
+            background-color: #2c2c3a;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        #ulMsgs li {
+            padding: 5px 10px;
+        }
+        input[type="text"] {
+            width: calc(100% - 70px);
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            margin-right: 10px;
+        }
+        .meet-ended {
+            font-size: 1.5rem;
+            color: #f87171;
+            margin-top: 30px;
+        }
+    </style>
 </head>
 <body>
+    <h1>Meeting Site</h1>
+    <video id="localVideo" autoplay muted playsinline></video>
+    <video id="remoteVideo" autoplay playsinline></video>
 
-  <h1>Sockets Zoom By Harsha</h1>
+    <div class="controls">
+        <button id="toggleCamera">Toggle Camera</button>
+        <button id="toggleMic">Toggle Mic</button>
+        <button id="screenShare">Share Screen</button>
+        <button id="endCall">End Call</button>
+    </div>
 
-  <div id="controls">
-    <button id="toggleCam">Toggle Camera</button>
-    <button id="toggleMic">Toggle Mic</button>
-    <button id="shareScreen">Share Screen</button>
-    <button onclick="copyLink()">Copy Link</button>
-  </div>
+    <form id="msgForm" class="chat">
+        <ul id="ulMsgs"></ul>
+        <div style="display: flex; align-items: center;">
+            <input type="text" id="inputMsg" placeholder="Type a message..." required />
+            <button type="submit">Send</button>
+        </div>
+    </form>
 
-  <video id="localVideo" autoplay muted playsinline></video>
-  <video id="remoteVideo" autoplay playsinline></video>
-  <div id="loading" class="loading">Waiting for remote user to join...</div>
+    <div id="meetClosed" class="meet-ended" style="display:none;">This meeting has ended.</div>
 
-  <form id="msgForm">
-    <input type="text" placeholder="Type a Message..." id="inputMsg" />
-    <button type="submit">Send</button>
-    <ul id="ulMsgs"></ul>
-  </form>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const roomId = window.location.pathname.split('/').pop();
 
-  <script src="/socket.io/socket.io.js"></script>
-  <script>
-    const socket = io();
-    const roomId = window.location.pathname.split("/").pop();
+        let localStream;
+        let peerConnection;
+        let isCameraOn = true;
+        let isMicOn = true;
 
-    const localVideo = document.getElementById("localVideo");
-    const remoteVideo = document.getElementById("remoteVideo");
-    const loadingText = document.getElementById("loading");
+        const config = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
 
-    const toggleCamBtn = document.getElementById("toggleCam");
-    const toggleMicBtn = document.getElementById("toggleMic");
-    const shareScreenBtn = document.getElementById("shareScreen");
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
 
-    const inputMsg = document.getElementById('inputMsg');
-    const messagesList = document.getElementById('ulMsgs');
-    const form = document.getElementById('msgForm');
+        const toggleCameraBtn = document.getElementById('toggleCamera');
+        const toggleMicBtn = document.getElementById('toggleMic');
+        const screenShareBtn = document.getElementById('screenShare');
+        const endCallBtn = document.getElementById('endCall');
+        const meetClosed = document.getElementById('meetClosed');
 
-    let localStream;
-    let peerConnection;
-    let remoteDescriptionSet = false;
-    let hasDisconnected = false;
-    let candidateQueue = [];
+        const inputMsg = document.getElementById('inputMsg');
+        const ulMsgs = document.getElementById('ulMsgs');
+        const msgForm = document.getElementById('msgForm');
 
-    const config = {
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-    };
+        toggleCameraBtn.onclick = () => {
+            localStream.getVideoTracks()[0].enabled = isCameraOn = !isCameraOn;
+        };
 
-    form.addEventListener("submit", e => {
-      e.preventDefault();
-      sendMessage();
-    });
+        toggleMicBtn.onclick = () => {
+            localStream.getAudioTracks()[0].enabled = isMicOn = !isMicOn;
+        };
 
-    function addMessage(msg) {
-      const li = document.createElement("li");
-      li.innerText = msg;
-      messagesList.appendChild(li);
-    }
+        screenShareBtn.onclick = async () => {
+            try {
+                const screenStream = await navigator.mediaDevices.getDisplayMedia();
+                const track = screenStream.getVideoTracks()[0];
+                const sender = peerConnection.getSenders().find(s => s.track.kind === 'video');
+                sender.replaceTrack(track);
+                track.onended = () => sender.replaceTrack(localStream.getVideoTracks()[0]);
+            } catch (err) {
+                alert('Screen sharing failed');
+            }
+        };
 
-    function sendMessage() {
-      const data = inputMsg.value;
-      socket.emit("message", data);
-      inputMsg.value = "";
-      addMessage("You: " + data);
-    }
+        endCallBtn.onclick = () => {
+            socket.emit('end-call', roomId);
+            meetClosed.style.display = 'block';
+            remoteVideo.style.display = 'none';
+        };
 
-    socket.on("message", data => {
-      addMessage("Friend: " + data.msg);
-    });
+        msgForm.onsubmit = e => {
+            e.preventDefault();
+            const msg = inputMsg.value;
+            socket.emit('message', { roomId, msg });
+            addMessage('You: ' + msg);
+            inputMsg.value = '';
+        };
 
-    async function startVideo() {
-      localStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
-      localVideo.srcObject = localStream;
+        function addMessage(msg) {
+            const li = document.createElement('li');
+            li.textContent = msg;
+            ulMsgs.appendChild(li);
+        }
 
-      peerConnection = new RTCPeerConnection(config);
+        async function startVideo() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
 
-      localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
-      });
+                peerConnection = new RTCPeerConnection(config);
 
-      peerConnection.onicecandidate = ({ candidate }) => {
-        if (candidate) socket.emit("ice-candidate", candidate);
-      };
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
 
-      peerConnection.ontrack = e => {
-        loadingText.classList.add("hidden");
-        remoteVideo.srcObject = e.streams[0];
-      };
+                peerConnection.onicecandidate = ({ candidate }) => {
+                    if (candidate) socket.emit('ice-candidate', { roomId, candidate });
+                };
 
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      socket.emit("offer", offer);
-    }
+                peerConnection.ontrack = ({ streams: [stream] }) => {
+                    remoteVideo.srcObject = stream;
+                };
 
-    toggleCamBtn.onclick = () => {
-      const videoTrack = localStream.getVideoTracks()[0];
-      videoTrack.enabled = !videoTrack.enabled;
-      toggleCamBtn.innerText = videoTrack.enabled ? "Turn Off Camera" : "Turn On Camera";
-    };
+                socket.emit('join', roomId);
+            } catch (err) {
+                alert('Could not start video. ' + err.message);
+            }
+        }
 
-    toggleMicBtn.onclick = () => {
-      const audioTrack = localStream.getAudioTracks()[0];
-      audioTrack.enabled = !audioTrack.enabled;
-      toggleMicBtn.innerText = audioTrack.enabled ? "Mute Mic" : "Unmute Mic";
-    };
+        socket.on('ready', async () => {
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            socket.emit('offer', { roomId, offer });
+        });
 
-    shareScreenBtn.onclick = async () => {
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      const screenTrack = screenStream.getVideoTracks()[0];
+        socket.on('offer', async ({ offer }) => {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit('answer', { roomId, answer });
+        });
 
-      const sender = peerConnection.getSenders().find(s => s.track.kind === "video");
-      sender.replaceTrack(screenTrack);
+        socket.on('answer', async ({ answer }) => {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        });
 
-      screenTrack.onended = () => {
-        const videoTrack = localStream.getVideoTracks()[0];
-        sender.replaceTrack(videoTrack);
-      };
-    };
+        socket.on('ice-candidate', async ({ candidate }) => {
+            try {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (e) {
+                console.error('Error adding ice candidate', e);
+            }
+        });
 
-    socket.on("offer", async offer => {
-      if (!peerConnection) await startVideo();
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-      remoteDescriptionSet = true;
+        socket.on('message', ({ msg }) => {
+            addMessage('Friend: ' + msg);
+        });
 
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      socket.emit("answer", answer);
+        socket.on('end-call', () => {
+            meetClosed.style.display = 'block';
+            remoteVideo.style.display = 'none';
+        });
 
-      for (let c of candidateQueue) {
-        await peerConnection.addIceCandidate(c);
-      }
-      candidateQueue = [];
-    });
-
-    socket.on("answer", async answer => {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-      remoteDescriptionSet = true;
-
-      for (let c of candidateQueue) {
-        await peerConnection.addIceCandidate(c);
-      }
-      candidateQueue = [];
-    });
-
-    socket.on("ice-candidate", async candidate => {
-      if (remoteDescriptionSet) {
-        await peerConnection.addIceCandidate(candidate);
-      } else {
-        candidateQueue.push(candidate);
-      }
-    });
-
-    socket.on("user-disconnected", () => {
-      if (!hasDisconnected) {
-        hasDisconnected = true;
-        alert("Peer disconnected. Reloading page...");
-        location.reload();
-      }
-    });
-
-    socket.emit("join-room", roomId);
-    window.onload = startVideo;
-
-    function copyLink() {
-      navigator.clipboard.writeText(window.location.href).then(() => {
-        alert("Meeting link copied to clipboard!");
-      });
-    }
-  </script>
+        startVideo();
+    </script>
 </body>
-
-
-
-
 </html>
-
-
-
