@@ -218,10 +218,45 @@
             addMessage('Friend: ' + msg);
         });
 
+        function stopAllMedia() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+            }
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+        }
+
+        // Replace your existing endCallBtn.onclick handler with this:
+        endCallBtn.onclick = () => {
+            socket.emit('end-call', roomId);
+            endCallCleanupAndNavigate();
+        };
+
         socket.on('end-call', () => {
-            meetClosed.style.display = 'block';
-            remoteVideo.style.display = 'none';
+            endCallCleanupAndNavigate();
         });
+
+        function endCallCleanupAndNavigate() {
+            stopAllMedia();
+
+            localVideo.style.display = 'none';
+            remoteVideo.style.display = 'none';
+            toggleCameraBtn.style.display = 'none';
+            toggleMicBtn.style.display = 'none';
+            screenShareBtn.style.display = 'none';
+            endCallBtn.style.display = 'none';
+            msgForm.style.display = 'none';
+            meetClosed.style.display = 'block';
+
+            meetClosed.textContent = 'The call has ended. Redirecting...';
+
+            setTimeout(() => {
+                window.location.href = '/landing.html';
+            }, 2000);
+        }
+
 
         startVideo();
     </script>
